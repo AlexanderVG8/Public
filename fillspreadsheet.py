@@ -1,6 +1,9 @@
+#!/usr/bin/env python 
+import datetime
 import requests
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from decimal import Decimal
 
 GET_TOKEN_URL = "https://target-sandbox.my.com/api/v2/oauth2/token.json"
 GET_DATA_URL = "https://target-sandbox.my.com/api/v1/campaigns.json?fields=id,status,stats_full"
@@ -9,29 +12,46 @@ WRITER_EMAIL='selikhovalexey@gmail.com'
 SPREADSHEET_NAME="spreadsheet_name"
 
 
-def print_header(_sheet, _attempt_num):
-	_sheet.update_cell(1,1,"CampaingId")
-	_sheet.update_cell(1,2,"Date")
-	_sheet.update_cell(1,3,"Amount 1")
-	_sheet.update_cell(1,4,"Amount 2")
-	_sheet.update_cell(1,5,"Clicks 1")
-	_sheet.update_cell(1,6,"Clicks 2")
-	_sheet.update_cell(1,7,"Shows 1")
-	_sheet.update_cell(1,8,"Shows 2")
-	_sheet.update_cell(1,9,_attempt_num)
+def print_header(_sheet, _attempt_num, _sheet_num):
+	_sheet.update_cell(1,1,"CampaingId" if _sheet_num==1 else "")
+	_sheet.update_cell(1,2,"Date" if _sheet_num==1 else "Month")
+	_sheet.update_cell(1,3,"Amount 1" if _sheet_num==1 else "Amount")
+	_sheet.update_cell(1,4,"Amount 2" if _sheet_num==1 else "Clicks")
+	_sheet.update_cell(1,5,"Clicks 1" if _sheet_num==1 else "Shows")
+	_sheet.update_cell(1,6,"Clicks 2" if _sheet_num==1 else "")
+	_sheet.update_cell(1,7,"Shows 1" if _sheet_num==1 else "")
+	_sheet.update_cell(1,8,"Shows 2" if _sheet_num==1 else "")
+	_sheet.update_cell(1,9,_attempt_num if _sheet_num==1 else "")
 
 
-def print_attempt(_sheet, _json, _attempt_num):
-	str_num = 2
+def print_attempt(_sheet, _json, _attempt_num, _sheet_num):
+	_str_num = 2
+	_month_data=dict()
 	for arr1 in _json:
 		for arr2 in arr1["stats_full"]:
-			_sheet.update_cell(str_num, 1, arr1["id"])
-			_sheet.update_cell(str_num, 2, arr2["date"])
-			_sheet.update_cell(str_num, 3 if _attempt_num == 1 else 4, arr2["amount"])
-			_sheet.update_cell(str_num, 5 if _attempt_num == 1 else 6, arr2["clicks"])
-			_sheet.update_cell(str_num, 7 if _attempt_num == 1 else 8, arr2["shows"])
-			str_num += 1
-
+			if _sheet_num==1:
+				_sheet.update_cell(_str_num, 1, arr1["id"])
+				_sheet.update_cell(_str_num, 2, arr2["date"])
+				_sheet.update_cell(_str_num, 3 if _attempt_num == 1 else 4, arr2["amount"])
+				_sheet.update_cell(_str_num, 5 if _attempt_num == 1 else 6, arr2["clicks"])
+				_sheet.update_cell(_str_num, 7 if _attempt_num == 1 else 8, arr2["shows"])
+				_str_num += 1
+			else:
+				_month_num = datetime.datetime.strptime(arr2["date"],'%d.%m.%Y').date().month
+				if _month_data.get(_month_num) is None:
+					_month_data.update({_month_num:{"amount":0,"clicks":0,"shows":0}})
+				_month_data[_month_num]["amount"] += Decimal(arr2["amount"])
+				_month_data[_month_num]["clicks"] += Decimal(arr2["clicks"])
+				_month_data[_month_num]["shows"] += Decimal(arr2["shows"])
+	if _sheet_num==2:
+		print(_month_data)
+		for month in _month_data:
+			print(month)
+			_sheet.update_cell(_str_num, 2, month)
+			_sheet.update_cell(_str_num, 3, _month_data[month]["amount"])
+			_sheet.update_cell(_str_num, 4, _month_data[month]["clicks"])
+			_sheet.update_cell(_str_num, 5, _month_data[month]["shows"])			
+			_str_num += 1
 
 formdata = {
 	"grant_type":"refresh_token",
@@ -81,6 +101,11 @@ except gspread.SpreadsheetNotFound:
 	spreadsheet.share(WRITER_EMAIL, perm_type='user', role='writer')
 	sheet = spreadsheet.sheet1
 
+sheet2 = spreadsheet.get_worksheet(1)
+if sheet2 is None:
+	sheet2 = spreadsheet.add_worksheet("month",512,10)
+sheet2.clear()
+
 if sheet.cell(1,9).value=='2':
 	print("Clear sheet...")
 	attempt_num = 1
@@ -88,7 +113,9 @@ if sheet.cell(1,9).value=='2':
 else:
 	attempt_num = 2
 
-print_header(sheet, attempt_num)
-print_attempt(sheet, r.json(), attempt_num)
+print_header(sheet, attempt_num, 1)
+print_attempt(sheet, r.json(), attempt_num, 1)
+print_header(sheet2, attempt_num, 2)
+print_attempt(sheet2, r.json(), attempt_num, 2)
 
 print("Done.")
